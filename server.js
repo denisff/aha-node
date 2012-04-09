@@ -1,4 +1,5 @@
 var Board = require('./board');
+var logule = require('logule');
 
 //var toarduinoqueue = seqqueue.createQueue(1000);
 //var fromarduinoqueue = seqqueue.createQueue(1000);
@@ -18,18 +19,18 @@ var Ahapacket = require('./ahaprotocol/ahapacket');
 
 var f1 = function() {
 var test1 = new Ahapacket();
-console.log("test 1 ...");
+logule.info("test 1 ...");
 test1.createCanMessage(1, 0, 2, 15, 0, 12, 0);
-console.log("test 2 ...");
+logule.info("test 2 ...");
 test1.toString();
-console.log("test 3 ...");
+logule.info("test 3 ...");
 var test2 = new Ahapacket();
-console.log("test 4 ...");
+logule.info("test 4 ...");
 test2.extractCanMessage(268566540);
-console.log("test 5 ...");
+logule.info("test 5 ...");
 test2.toString();
 };
 
 f1();
 
-console.log("Starting...");
+logule.line("Starting...");
