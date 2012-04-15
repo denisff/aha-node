@@ -1,7 +1,8 @@
 var logule = require('logule'),
     serial = require('serialport'),
     Crc16 = require('./ahaprotocol/crc16'),
-    Ahapacket = require('./ahaprotocol/ahapacket');
+    Ahapacket = require('./ahaprotocol/ahapacket'),
+    Buffer = require('buffer').Buffer;
 /*
  * The main Arduino constructor
  * Connect to the serial port and bind
@@ -31,19 +32,22 @@ var Class = function(options) {
 
         logule.debug('SerialPort ouvert:');
 
-        this.serialPort.on("data", function(data) {
+        var self = this;
+        self.serialPort.on("data", function(data) {
             // loop on data received
             var datalen = data.length;
 
             for (var i = 0; i < datalen; i++) {
-                var bIn = data.charCodeAt(i);
-                processData(bIn);
+                var bIn = data.readUInt8(i);
+                self.processData(bIn);
             }
         });
 
-        this.serialPort.on("close", function() {
+        self.serialPort.on("close", function() {
             logule.info('SerialPort ferme.');
         });
+
+        self.listen();
     };
 
 // properties and methods
@@ -86,220 +90,221 @@ Class.prototype = {
     I_FRAME_DATA: 0x0 //0
 };
 
+
 Class.prototype.listen = function() {
-    setInterval(function() {
-        if (this.receivedqueue.length > 0) {
+    var self = this;
+    setInterval(
+    function() {
+        if (self.receivedqueue.length > 0) {
             // received message
-            this.receivedqueue[0].toString();
-            this.receivedqueue.shift();
+            self.receivedqueue[0].toString();
+            self.receivedqueue.shift();
         }
-        if (this.sentqueue.length > 0 && !this.linkup) {
+        if (self.sentqueue.length > 0 && !self.linkup) {
             // send message
             logule.info("SEND U_FRAME_SABM (listen)");
-            this.linkup = true;
-            sendFrame(this.U_FRAME_SABM);
+            self.linkup = true;
+            self.sendFrame(self.U_FRAME_SABM);
         }
     }, 1000);
 };
 
-var processData = function(char) {
-        if (char === this.ESCAPE_OCTET) {
-            this.unEscaping = true;
-            return;
-        }
+Class.prototype.processData = function(char) {
+    if (char === this.ESCAPE_OCTET) {
+        this.unEscaping = true;
+        return;
+    }
 
-        if (char === this.FRAME_BOUNDARY && !this.unEscaping) {
-            if (this.inPacket) {
-                // End of packet
-                if (this.bufferFrame.length > 0) {
-                    this.inPacket = false;
-                    processFrame(this.bufferFrame);
-                }
-                else {
-                    // Beginning of packet 
-                    this.bufferFrame.clear();
-                    this.inPacket = true;
-                }
+    if (char === this.FRAME_BOUNDARY && !this.unEscaping) {
+        if (this.inPacket) {
+            // End of packet
+            if (this.bufferFrame.length > 0) {
+                this.inPacket = false;
+                this.processFrame(this.bufferFrame);
             }
             else {
-                if (this.unEscaping) {
-                    char ^= this.ESCAPEXOR_FLAG;
-                    this.unEscaping = false;
-                }
-
-                if (this.bufferFrame.length() < this.maxPacketSize) {
-                    this.bufferFrame.push(char);
-                }
-                else {
-                    logule.warn('Message too big');
-                }
+                // Beginning of packet 
+                this.bufferFrame.clear();
+                this.inPacket = true;
             }
-        }
-    };
-
-var processFrame = function(frame) {
-        var framelen = frame.length;
-        var messCRC;
-        if (framelen < 3) {
-            // less than 3 bytes so wrong message
-            logule.warn('less than 3 bytes so wrong message');
-            return;
-        }
-
-        // crc 2 last bytes
-        this.incrc.reset();
-        for (var icrc = 0; icrc < framelen - 2; icrc++) {
-            this.incrc.update(frame[icrc]);
-        }
-        //message's crc
-        messCRC = frame[framelen - 2] & 0xff + ((frame[framelen - 1] & 0xff) << 8);
-        if (messCRC != this.incrc.get()) {
-            // CRC error
-            logule.warn('CRC Error');
-            return;
-        }
-
-        if ((frame[0] & this.I_FRAME_BITS) === 0x0) {
-            handleInformationFrame(frame, framelen);
-        }
-        else if ((frame[0] & this.S_FRAME_BITS) === 0x1) {
-            handleSupervisoryFrame(frame);
         }
         else {
-            handleUnnumberedFrame(frame);
-        }
-    };
+            if (this.unEscaping) {
+                char ^= this.ESCAPEXOR_FLAG;
+                this.unEscaping = false;
+            }
 
-var handleInformationFrame = function(frame, framelen) {
-        if (framelen - 3 > 0) {
-            // create CAN message
-            var canMessage = new Ahapacket().loadCanMessage(frame.slice(1, framelen - 3));
-
-            logule.info('GOT I_FRAME (handleInformationFrame)');
-            this.receivedqueue.push(canMessage);
-            logule.info('SEND S_FRAME_RR (handleInformationFrame)');
-            sendFrame(this.S_FRAME_RR);
-        }
-    };
-
-var handleUnnumberedFrame = function(frame) {
-        switch (frame[0]) {
-        case this.U_FRAME_SABM:
-            logule.info('GOT U_FRAME_SABM (handleUnnumberedFrame)');
-            if (!this.linkUp) {
-                this.linkup = true;
-                logule.info('SEND U_FRAME_UA (handleUnnumberedFrame)');
-                sendFrame(this.U_FRAME_UA);
+            if (this.bufferFrame.length < this.maxPacketSize) {
+                this.bufferFrame.push(char);
             }
             else {
-                logule.info("SEND U_FRAME_DM (handleUnnumberedFrame)");
-                sendFrame(this.U_FRAME_DM);
+                logule.warn('Message too big');
             }
-            break;
-        case this.U_FRAME_DM:
-            logule.info('GOT U_FRAME_DM (handleUnnumberedFrame)');
-            this.linkup = false;
-            break;
-        case this.U_FRAME_UA:
-            logule.info('GOT U_FRAME_UA (handleUnnumberedFrame)');
-            if (this.lastControlByte === this.U_FRAME_SABM) {
-                if (!this.linkUp) return;
-                if (this.sentqueue.length > 0) {
-                    logule.info('SEND I_FRAME_DATA (handleUnnumberedFrame)');
-                    sendIFrameData(this.sentqueue[0]);
-                }
-                else {
-                    logule.info("SEND U_FRAME_DISC (handleUnnumberedFrame)");
-                    sendFrame(this.U_FRAME_DISC);
-                }
-            }
-            else {
-                this.linkup = false;
-                if (this.sentqueue.length > 0) {
-                    logule.info("SEND U_FRAME_SABM (handleUnnumberedFrame)");
-                    this.linkup = true;
-                    sendFrame(this.U_FRAME_SABM);
-                }
-            }
-            break;
-        case this.U_FRAME_DISC:
-            logule.info('GOT U_FRAME_DISC (handleUnnumberedFrame)');
+        }
+    }
+};
+
+Class.prototype.processFrame = function(frame) {
+    var framelen = frame.length;
+    var messCRC;
+    if (framelen < 3) {
+        // less than 3 bytes so wrong message
+        logule.warn('less than 3 bytes so wrong message');
+        return;
+    }
+
+    // crc 2 last bytes
+    this.incrc.reset();
+    for (var icrc = 0; icrc < framelen - 2; icrc++) {
+        this.incrc.update(frame[icrc]);
+    }
+    //message's crc
+    messCRC = frame[framelen - 2] & 0xff + ((frame[framelen - 1] & 0xff) << 8);
+    if (messCRC != this.incrc.get()) {
+        // CRC error
+        logule.warn('CRC Error');
+        return;
+    }
+
+    if ((frame[0] & this.I_FRAME_BITS) === 0x0) {
+        this.handleInformationFrame(frame, framelen);
+    }
+    else if ((frame[0] & this.S_FRAME_BITS) === 0x1) {
+        this.handleSupervisoryFrame(frame);
+    }
+    else {
+        this.handleUnnumberedFrame(frame);
+    }
+};
+
+Class.prototype.handleInformationFrame = function(frame, framelen) {
+    if (framelen - 3 > 0) {
+        // create CAN message
+        var canMessage = new Ahapacket().loadCanMessage(frame.slice(1, framelen - 3));
+
+        logule.info('GOT I_FRAME (handleInformationFrame)');
+        this.receivedqueue.push(canMessage);
+        logule.info('SEND S_FRAME_RR (handleInformationFrame)');
+        this.sendFrame(this.S_FRAME_RR);
+    }
+};
+
+Class.prototype.handleUnnumberedFrame = function(frame) {
+    switch (frame[0]) {
+    case this.U_FRAME_SABM:
+        logule.info('GOT U_FRAME_SABM (handleUnnumberedFrame)');
+        if (!this.linkUp) {
+            this.linkup = true;
             logule.info('SEND U_FRAME_UA (handleUnnumberedFrame)');
-            sendFrame(this.U_FRAME_UA);
+            this.sendFrame(this.U_FRAME_UA);
+        }
+        else {
+            logule.info("SEND U_FRAME_DM (handleUnnumberedFrame)");
+            this.sendFrame(this.U_FRAME_DM);
+        }
+        break;
+    case this.U_FRAME_DM:
+        logule.info('GOT U_FRAME_DM (handleUnnumberedFrame)');
+        this.linkup = false;
+        break;
+    case this.U_FRAME_UA:
+        logule.info('GOT U_FRAME_UA (handleUnnumberedFrame)');
+        if (this.lastControlByte === this.U_FRAME_SABM) {
+            if (!this.linkUp) return;
+            if (this.sentqueue.length > 0) {
+                logule.info('SEND I_FRAME_DATA (handleUnnumberedFrame)');
+                this.sendIFrameData(this.sentqueue[0]);
+            }
+            else {
+                logule.info("SEND U_FRAME_DISC (handleUnnumberedFrame)");
+                this.sendFrame(this.U_FRAME_DISC);
+            }
+        }
+        else {
             this.linkup = false;
-            break;
-        default:
-            logule.info('GOT ??? ' + frame[0] + ' FRAME (handleUnnumberedFrame)');
-            logule.info('SEND U_FRAME_DISC (handleUnnumberedFrame)');
-            sendFrame(this.U_FRAME_DISC);
-            break;
+            if (this.sentqueue.length > 0) {
+                logule.info("SEND U_FRAME_SABM (handleUnnumberedFrame)");
+                this.linkup = true;
+                this.sendFrame(this.U_FRAME_SABM);
+            }
         }
-    };
+        break;
+    case this.U_FRAME_DISC:
+        logule.info('GOT U_FRAME_DISC (handleUnnumberedFrame)');
+        logule.info('SEND U_FRAME_UA (handleUnnumberedFrame)');
+        this.sendFrame(this.U_FRAME_UA);
+        this.linkup = false;
+        break;
+    default:
+        logule.info('GOT ??? ' + frame[0] + ' FRAME (handleUnnumberedFrame)');
+        logule.info('SEND U_FRAME_DISC (handleUnnumberedFrame)');
+        this.sendFrame(this.U_FRAME_DISC);
+        break;
+    }
+};
 
-var handleSupervisoryFrame = function(frame) {
-        switch (frame[0]) {
-        case this.S_FRAME_RR:
-            // RR receive ready, packet have only one frame so send DISC
-            logule.info('GOT S_FRAME_RR (handleSupervisoryFrame)');
-            this.sentqueue.shift();
-            logule.info("SEND U_FRAME_DISC (handleSupervisoryFrame)");
-            sendFrame(this.U_FRAME_DISC);
-            break;
-        case this.S_FRAME_RNR:
-            // RNR receive not ready
-            logule.info('GOT S_FRAME_RNR (handleSupervisoryFrame)');
-            logule.info('SEND U_FRAME_DISC (handleSupervisoryFrame)');
-            sendFrame(this.U_FRAME_DISC);
-            break;
-        case this.S_FRAME_REJ:
-            // REJ rejected
-            logule.info('GOT S_FRAME_REJ (handleSupervisoryFrame)');
-            logule.info('SEND I_FRAME_DATA (handleSupervisoryFrame)');
-            sendIFrameData(this.sentqueue[0]);
-            break;
-        default:
-            logule.info('GOT ??? ' + frame[0] + ' FRAME (handleSupervisoryFrame)');
-            logule.info('SEND I_FRAME_DATA (handleSupervisoryFrame)');
-            sendFrame(this.U_FRAME_DISC);
-            break;
-        }
-    };
+Class.prototype.handleSupervisoryFrame = function(frame) {
+    switch (frame[0]) {
+    case this.S_FRAME_RR:
+        // RR receive ready, packet have only one frame so send DISC
+        logule.info('GOT S_FRAME_RR (handleSupervisoryFrame)');
+        this.sentqueue.shift();
+        logule.info("SEND U_FRAME_DISC (handleSupervisoryFrame)");
+        this.sendFrame(this.U_FRAME_DISC);
+        break;
+    case this.S_FRAME_RNR:
+        // RNR receive not ready
+        logule.info('GOT S_FRAME_RNR (handleSupervisoryFrame)');
+        logule.info('SEND U_FRAME_DISC (handleSupervisoryFrame)');
+        this.sendFrame(this.U_FRAME_DISC);
+        break;
+    case this.S_FRAME_REJ:
+        // REJ rejected
+        logule.info('GOT S_FRAME_REJ (handleSupervisoryFrame)');
+        logule.info('SEND I_FRAME_DATA (handleSupervisoryFrame)');
+        this.sendIFrameData(this.sentqueue[0]);
+        break;
+    default:
+        logule.info('GOT ??? ' + frame[0] + ' FRAME (handleSupervisoryFrame)');
+        logule.info('SEND I_FRAME_DATA (handleSupervisoryFrame)');
+        this.sendFrame(this.U_FRAME_DISC);
+        break;
+    }
+};
 
-var sendFrame = function(frame) {
-        var packet = [];
+Class.prototype.sendFrame = function(frame) {
+    var packet = new Buffer(5);
 
-        this.lastControlByte = frame;
-        packet.push(this.FRAME_BOUNDARY);
-        packet.push(frame);
-        this.outcrc.reset();
-        this.outcrc.update(frame);
-        packet.push(this.outcrc.get() & 0xff);
-        packet.push(this.outcrc.get() >> 8);
-        packet.push(this.FRAME_BOUNDARY);
-        this.serialport.write(packet);
-    };
+    logule.info('sendFrame');
+    this.lastControlByte = frame;
+    packet.writeUInt8(this.FRAME_BOUNDARY, 0);
+    packet.writeUInt8(frame,1);
+    this.outcrc.reset();
+    this.outcrc.update(frame);
+    packet.writeUInt8(this.outcrc.get() & 0xff,2);
+    packet.writeUInt8(this.outcrc.get() >> 8,3);
+    packet.writeUInt8(this.FRAME_BOUNDARY,4);
+    this.serialPort.write(packet);
+};
 
-var sendIFrameData = function(canMessage) {
-        var packet = [];
-        var datas = canMessage.getdatas();
-        var len = datas.length;
+Class.prototype.sendIFrameData = function(canMessage) {
+    var datas = canMessage.getdatas();
+    var len = datas.length;
+    var packet = new Buffer(len+5);
 
-        this.lastControlByte = this.I_FRAME_DATA;
-        packet.push(this.FRAME_BOUNDARY);
-        packet.push(this.I_FRAME_DISC);
-        this.outcrc.reset();
-        this.outcrc.update(this.I_FRAME_DATA);
-        for (var i = 0; i < len; i++) {
-            this.outcrc.update(datas[i]);
-            packet.push(datas[i]);
-        }
-        packet.push(this.outcrc.get() & 0xff);
-        packet.push(this.outcrc.get() >> 8);
-        packet.push(this.FRAME_BOUNDARY);
-        this.serialport.write(packet);
-    };
-
-Class.prototype.server = function() {};
-
+    this.lastControlByte = this.I_FRAME_DATA;
+    packet.writeUInt8(this.FRAME_BOUNDARY,0);
+    packet.writeUInt8(this.I_FRAME_DISC,1);
+    this.outcrc.reset();
+    this.outcrc.update(this.I_FRAME_DATA);
+    for (var i = 0; i < len; i++) {
+        this.outcrc.update(datas[i]);
+        packet.writeUInt8(datas[i],2+i);
+    }
+    packet.writeUInt8(this.outcrc.get() & 0xff,2+len);
+    packet.writeUInt8(this.outcrc.get() >> 8,3+len);
+    packet.writeUInt8(this.FRAME_BOUNDARY,4+len);
+    this.serialPort.write(packet);
+};
 
 module.exports = Class;

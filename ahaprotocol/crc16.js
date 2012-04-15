@@ -1,13 +1,12 @@
-var Crc16 = function () {
+var Class = function () {
     this.crc = 0xffff;
     };
 
-Crc16.prototype.reset = function () {
+Class.prototype.reset = function () {
   this.crc = 0xffff;
 };
 
-Crc16.prototype.update = function (d) {
-  console.log(d);
+Class.prototype.update = function (d) {
   var data = d & 0xff;
   data ^= this.crc & 0xff;
 
@@ -18,8 +17,8 @@ Crc16.prototype.update = function (d) {
   this.crc = this.crc & 0xffff;
 };
 
-Crc16.prototype.get = function () {
+Class.prototype.get = function () {
   return this.crc;
 };
 
-module.exports = Crc16;
+module.exports = Class;
