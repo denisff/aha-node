@@ -94,10 +94,11 @@ Class.prototype = {
 Class.prototype.listen = function() {
     var self = this;
     setInterval(
+
     function() {
         if (self.receivedqueue.length > 0) {
             // received message
-            self.receivedqueue[0].toString();
+            logule.info(self.receivedqueue[0].toString());
             self.receivedqueue.shift();
         }
         if (self.sentqueue.length > 0 && !self.linkup) {
@@ -122,26 +123,27 @@ Class.prototype.processData = function(char) {
                 this.inPacket = false;
                 this.processFrame(this.bufferFrame);
             }
-            else {
-                // Beginning of packet 
-                this.bufferFrame.clear();
-                this.inPacket = true;
-            }
         }
         else {
-            if (this.unEscaping) {
-                char ^= this.ESCAPEXOR_FLAG;
-                this.unEscaping = false;
-            }
-
-            if (this.bufferFrame.length < this.maxPacketSize) {
-                this.bufferFrame.push(char);
-            }
-            else {
-                logule.warn('Message too big');
-            }
+            // Beginning of packet 
+            this.bufferFrame = [];
+            this.inPacket = true;
         }
     }
+    else {
+        if (this.unEscaping) {
+            char ^= this.ESCAPEXOR_FLAG;
+            this.unEscaping = false;
+        }
+
+        if (this.bufferFrame.length < this.maxPacketSize) {
+            this.bufferFrame.push(char);
+        }
+        else {
+            logule.warn('PROCESSDATA Message too big');
+        }
+    }
+
 };
 
 Class.prototype.processFrame = function(frame) {
@@ -159,7 +161,8 @@ Class.prototype.processFrame = function(frame) {
         this.incrc.update(frame[icrc]);
     }
     //message's crc
-    messCRC = frame[framelen - 2] & 0xff + ((frame[framelen - 1] & 0xff) << 8);
+    messCRC = frame[framelen - 2] & 0xff;
+    messCRC += (frame[framelen - 1] & 0xff) << 8;
     if (messCRC != this.incrc.get()) {
         // CRC error
         logule.warn('CRC Error');
@@ -180,8 +183,8 @@ Class.prototype.processFrame = function(frame) {
 Class.prototype.handleInformationFrame = function(frame, framelen) {
     if (framelen - 3 > 0) {
         // create CAN message
-        var canMessage = new Ahapacket().loadCanMessage(frame.slice(1, framelen - 3));
-
+        var canMessage = new Ahapacket();
+        canMessage.loadCanMessage(frame.slice(1, framelen - 2));
         logule.info('GOT I_FRAME (handleInformationFrame)');
         this.receivedqueue.push(canMessage);
         logule.info('SEND S_FRAME_RR (handleInformationFrame)');
@@ -210,10 +213,11 @@ Class.prototype.handleUnnumberedFrame = function(frame) {
     case this.U_FRAME_UA:
         logule.info('GOT U_FRAME_UA (handleUnnumberedFrame)');
         if (this.lastControlByte === this.U_FRAME_SABM) {
-            if (!this.linkUp) return;
+            if (!this.linkup) return;
             if (this.sentqueue.length > 0) {
+                var canmessage = this.sentqueue[0];
                 logule.info('SEND I_FRAME_DATA (handleUnnumberedFrame)');
-                this.sendIFrameData(this.sentqueue[0]);
+                this.sendIFrameData(canmessage);
             }
             else {
                 logule.info("SEND U_FRAME_DISC (handleUnnumberedFrame)");
@@ -275,35 +279,34 @@ Class.prototype.handleSupervisoryFrame = function(frame) {
 Class.prototype.sendFrame = function(frame) {
     var packet = new Buffer(5);
 
-    logule.info('sendFrame');
     this.lastControlByte = frame;
     packet.writeUInt8(this.FRAME_BOUNDARY, 0);
-    packet.writeUInt8(frame,1);
+    packet.writeUInt8(frame, 1);
     this.outcrc.reset();
     this.outcrc.update(frame);
-    packet.writeUInt8(this.outcrc.get() & 0xff,2);
-    packet.writeUInt8(this.outcrc.get() >> 8,3);
-    packet.writeUInt8(this.FRAME_BOUNDARY,4);
+    packet.writeUInt8(this.outcrc.get() & 0xff, 2);
+    packet.writeUInt8(this.outcrc.get() >> 8, 3);
+    packet.writeUInt8(this.FRAME_BOUNDARY, 4);
     this.serialPort.write(packet);
 };
 
 Class.prototype.sendIFrameData = function(canMessage) {
     var datas = canMessage.getdatas();
     var len = datas.length;
-    var packet = new Buffer(len+5);
+    var packet = new Buffer(len + 5);
 
     this.lastControlByte = this.I_FRAME_DATA;
-    packet.writeUInt8(this.FRAME_BOUNDARY,0);
-    packet.writeUInt8(this.I_FRAME_DISC,1);
+    packet.writeUInt8(this.FRAME_BOUNDARY, 0);
+    packet.writeUInt8(this.I_FRAME_DATA, 1);
     this.outcrc.reset();
     this.outcrc.update(this.I_FRAME_DATA);
     for (var i = 0; i < len; i++) {
         this.outcrc.update(datas[i]);
-        packet.writeUInt8(datas[i],2+i);
+        packet.writeUInt8(datas[i], 2 + i);
     }
-    packet.writeUInt8(this.outcrc.get() & 0xff,2+len);
-    packet.writeUInt8(this.outcrc.get() >> 8,3+len);
-    packet.writeUInt8(this.FRAME_BOUNDARY,4+len);
+    packet.writeUInt8(this.outcrc.get() & 0xff, 2 + len);
+    packet.writeUInt8(this.outcrc.get() >> 8, 3 + len);
+    packet.writeUInt8(this.FRAME_BOUNDARY, 4 + len);
     this.serialPort.write(packet);
 };
 

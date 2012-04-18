@@ -23,6 +23,7 @@ var f1 = function() {
         sentqueue.push(test1);
     };
 
-f1();
+setTimeout(
+f1, 5000);
 
 logule.info("Starting...");
