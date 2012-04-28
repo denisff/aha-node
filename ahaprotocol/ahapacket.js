@@ -1,8 +1,6 @@
 // Constructor
 var Class = function() {};
 
-
-
 // properties and methods
 Class.prototype = {
     CID_TYP_NV: 0x00,
@@ -77,6 +75,14 @@ Class.prototype.loadCanMessage = function(payload) {
     if (this.datalen > 0) {
         this.datas = payload.slice(4, this.datalen);
     }
+};
+
+Class.prototype.addU8 = function(d) {
+    this.datas.push(d & 0xff);
+};
+
+Class.prototype.addU16 = function(d) {
+    this.datas.push(d & 0xffff);
 };
 
 Class.prototype.getdatas = function() {

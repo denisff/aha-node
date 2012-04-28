@@ -96,11 +96,6 @@ Class.prototype.listen = function() {
     setInterval(
 
     function() {
-        if (self.receivedqueue.length > 0) {
-            // received message
-            logule.info(self.receivedqueue[0].toString());
-            self.receivedqueue.shift();
-        }
         if (self.sentqueue.length > 0 && !self.linkup) {
             // send message
             logule.info("SEND U_FRAME_SABM (listen)");
